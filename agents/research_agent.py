@@ -26,6 +26,7 @@ def run_research_workflow(
 
     competitor_analysis = run_competitor_analysis(
         company_name=company_name,
+        company_analysis=company_analysis,
         competitor_urls=competitor_urls,
     )
 

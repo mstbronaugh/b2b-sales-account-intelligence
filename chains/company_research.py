@@ -15,7 +15,7 @@ load_dotenv(override=True)
 
 model = ChatGroq(
     api_key=os.getenv("GROQ_API_KEY"),
-    model="openai/gpt-oss-20b",
+    model="groq/compound-mini",
     temperature=0,
 )
 
