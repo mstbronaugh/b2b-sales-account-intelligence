@@ -181,6 +181,30 @@ if submitted:
 
 
                 # ====================================================
+                # BUSINESS PRIORITIES
+                # ====================================================
+
+                if company_analysis.business_priorities:
+
+                    st.markdown("### Business Priorities")
+
+                    for priority in company_analysis.business_priorities:
+                        st.markdown(f"- {priority}")
+
+
+                # ====================================================
+                # CYBERSECURITY SIGNALS
+                # ====================================================
+
+                if company_analysis.cybersecurity_signals:
+
+                    st.markdown("### Cybersecurity Signals")
+
+                    for signal in company_analysis.cybersecurity_signals:
+                        st.markdown(f"- {signal}")
+
+
+                # ====================================================
                 # COMPETITOR ANALYSIS
                 # ====================================================
 
@@ -257,13 +281,8 @@ if submitted:
 
                 if annual_insights:
 
-                    st.markdown(
-                        clean_output(
-                            "\n\n".join(
-                                annual_insights
-                            )
-                        )
-                    )
+                    for insight in annual_insights:
+                        st.markdown(f"- {insight}")
 
                 else:
 
@@ -332,11 +351,6 @@ if submitted:
 
                 st.header("Cyber2Safe Opportunity")
 
-                #
-                # IMPORTANT:
-                # Display the AI recommendation, NOT the form selection.
-                #
-
                 recommended_service = getattr(
                     sales,
                     "recommended_cyber2safe_service",
@@ -354,7 +368,8 @@ if submitted:
 
                     st.write(
                         "**Recommended Service:** "
-                        "See AI recommendation below."
+                        "Insufficient Public Evidence for a "
+                        "Specific Recommendation"
                     )
 
 
@@ -384,6 +399,41 @@ if submitted:
                         "No specific sales opportunity was identified "
                         "from the verified public information."
                     )
+
+
+                # ====================================================
+                # WHY IT FITS
+                # ====================================================
+
+                why_it_fits = getattr(
+                    sales,
+                    "why_it_fits",
+                    [],
+                )
+
+                if why_it_fits:
+
+                    st.markdown("### Supporting Evidence")
+
+                    for evidence in why_it_fits:
+                        st.markdown(f"- {evidence}")
+
+
+                # ====================================================
+                # LIKELY BUYER
+                # ====================================================
+
+                likely_buyer = getattr(
+                    sales,
+                    "likely_buyer",
+                    "",
+                )
+
+                if likely_buyer:
+
+                    st.markdown("### Potential Buyer")
+
+                    st.write(likely_buyer)
 
 
                 # ====================================================
@@ -551,16 +601,22 @@ if submitted:
 
 
                 with st.expander(
+                    "Structured Sales Recommendation"
+                ):
+
+                    st.json(
+                        sales.model_dump()
+                    )
+
+
+                with st.expander(
                     "Recent Articles"
                 ):
 
                     if recent_articles:
 
                         for article in recent_articles:
-
-                            st.json(
-                                article
-                            )
+                            st.json(article)
 
                     else:
 

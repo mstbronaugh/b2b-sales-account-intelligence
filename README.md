@@ -2,85 +2,376 @@
 
 Cyber2Safe B2B Sales Intelligence is an AI-powered research assistant designed to support B2B cybersecurity sales prospecting.
 
-The application researches a prospective organization using publicly available information and transforms the research into actionable sales intelligence for Cyber2Safe.
+The application researches prospective organizations using publicly available information and transforms that research into structured sales intelligence for Cyber2Safe.
 
-## What the Application Does
+The goal of the project is to demonstrate how generative AI, web research, structured workflows, and evidence-grounded prompts can support a practical B2B cybersecurity sales use case.
 
-The system can:
 
-- Research a prospective company's strategy and business priorities
-- Identify cybersecurity-relevant business signals
-- Research and compare a supplied competitor
-- Generate a side-by-side competitor analysis
-- Research relevant company leadership
-- Review available annual report and 10-K information
-- Review recent public developments
-- Recommend a Cyber2Safe service based on retrieved evidence
-- Generate a sales angle and suggested outreach
-- Display verified public sources
+## Project Purpose
 
-## AI Architecture
+Traditional B2B sales research can require manually reviewing company websites, leadership information, competitors, job postings, public filings, and recent developments.
 
-The project uses a multi-agent workflow with specialized components for:
+This project automates portions of that research process.
 
-1. Company research
-2. Competitor analysis
-3. Leadership research
-4. Annual report and 10-K research
-5. Sales recommendation and account intelligence
+The application accepts information about a prospective organization and performs multiple specialized research and analysis stages before producing a Cyber2Safe sales recommendation and final account brief.
 
-LangChain coordinates the AI workflow and prompt structure.
-
-Groq provides API access to the large language model used to analyze the retrieved information and generate the account intelligence.
-
-Streamlit provides the interactive web interface.
-
-## Responsible AI Approach
-
-The system is designed to reduce unsupported AI-generated claims.
-
-Prompts instruct the model to:
-
-- Use retrieved public information
-- Avoid inventing company facts
-- Avoid assuming missing information represents a weakness
-- Clearly identify unavailable information
-- Separate verified information from sales recommendations
-- Avoid inventing cybersecurity vulnerabilities, breaches, or compliance failures
 
 ## Cyber2Safe Services
 
-The application evaluates opportunities for two Cyber2Safe services:
+The application evaluates potential opportunities for two Cyber2Safe services.
+
 
 ### Cybersecurity Assessment
 
 A practical review of an organization's cybersecurity practices with recommendations for areas that may require improvement.
 
+
 ### Cybersecurity Awareness Training
 
-Educational training focused on practical cybersecurity awareness and human-centered cyber risk.
+Educational training focused on practical cybersecurity awareness and human-centered cybersecurity risk.
 
-## Technology
+
+## What the Application Does
+
+The system can:
+
+- Retrieve content from a prospective company's public website
+- Research company strategy and business priorities
+- Identify cybersecurity-relevant public signals
+- Research technology and cybersecurity job postings
+- Research competitors supplied by the user
+- Retrieve public competitor website content
+- Generate a side-by-side competitor comparison
+- Research publicly available leadership information
+- Search for annual reports and 10-K information
+- Research recent public company developments
+- Retrieve selected source webpages for deeper analysis
+- Generate a structured Cyber2Safe service recommendation
+- Generate a consultative sales angle
+- Generate suggested outreach
+- Produce a final B2B account intelligence brief
+- Preserve public source links used during research
+
+
+## Application Workflow
+
+The primary workflow is:
+
+User Input
+
+↓
+
+Company Research
+
+↓
+
+Competitor Research
+
+↓
+
+Leadership Research
+
+↓
+
+Annual Report / 10-K Research
+
+↓
+
+Recent Development Research
+
+↓
+
+Cyber2Safe Sales Recommendation
+
+↓
+
+Account Brief Synthesis
+
+↓
+
+Streamlit User Interface
+
+
+## AI Architecture
+
+The project uses one coordinating research workflow with multiple specialized AI research and analysis stages.
+
+
+### Company Research
+
+The company research stage retrieves the prospect's website and researches:
+
+- Company strategy
+- Business priorities
+- Cybersecurity signals
+- Technology signals
+- Growth signals
+- Relevant job postings
+
+
+### Competitor Analysis
+
+The competitor analysis stage retrieves public information from competitor URLs supplied by the user.
+
+The prospect research and competitor research are then provided to the language model to generate an evidence-based side-by-side comparison.
+
+Comparison areas include:
+
+- Services offered
+- Target markets
+- Assessment capabilities
+- Training capabilities
+- Delivery methods
+- Cybersecurity focus
+- Market positioning
+
+
+### Leadership Research
+
+The leadership research stage searches for publicly available leaders who may be relevant to cybersecurity services.
+
+Examples include:
+
+- CEO
+- CIO
+- CTO
+- CISO
+- IT leadership
+- Security leadership
+- HR leadership
+- Learning and Development leadership
+- Risk and Compliance leadership
+
+The workflow is instructed not to invent executives when verified leadership information cannot be retrieved.
+
+
+### Annual Report and 10-K Research
+
+This stage searches for public annual reports and 10-K information.
+
+When information is available, the workflow can analyze:
+
+- Disclosed cybersecurity risks
+- Strategic priorities
+- Technology priorities
+- Workforce risks
+- Information security references
+- Regulatory concerns
+- Compliance concerns
+
+When no filing is available, the system reports that limitation rather than generating filing information.
+
+
+### Recent Development Research
+
+The application searches for recent public developments related to the prospect.
+
+Research may include:
+
+- Cybersecurity developments
+- Technology initiatives
+- Growth
+- Partnerships
+- Expansion
+- Other relevant business developments
+
+
+### Sales Recommendation
+
+Research from earlier stages is provided to the Cyber2Safe sales recommendation workflow.
+
+The recommendation uses a Pydantic `SalesRecommendation` schema so the language model returns structured information.
+
+Structured fields include:
+
+- Recommended Cyber2Safe service
+- Opportunity summary
+- Supporting evidence
+- Potential buyer
+- Recommended sales angle
+- Suggested outreach message
+
+The recommendation is generated by the AI rather than being overwritten by the service selected in the user interface.
+
+
+### Account Brief Synthesis
+
+The final stage combines the research and structured sales recommendation into an account intelligence brief designed to support sales preparation.
+
+
+## Structured Output
+
+Pydantic models are used to define expected application data.
+
+Current schemas include:
+
+- `CompanyResearch`
+- `CompetitorResearch`
+- `LeadershipResearch`
+- `AnnualReportResearch`
+- `SalesRecommendation`
+- `AccountBrief`
+
+Structured output improves consistency and makes individual research fields easier to validate, display, test, and reuse.
+
+
+## Web Research and Source Retrieval
+
+The application uses DuckDuckGo search to discover relevant public sources.
+
+The research workflow then attempts to retrieve selected result pages using Requests.
+
+BeautifulSoup is used to extract readable webpage content.
+
+The research process therefore follows this general pattern:
+
+Search
+
+↓
+
+Identify relevant public URLs
+
+↓
+
+Open selected webpages
+
+↓
+
+Extract webpage content
+
+↓
+
+Provide retrieved evidence to the AI workflow
+
+Search-result snippets are retained only as a fallback when the full webpage cannot be retrieved.
+
+This approach provides stronger grounding than relying exclusively on search-result snippets.
+
+
+## Responsible AI and Grounding
+
+A major design goal of this project is reducing unsupported AI-generated claims.
+
+Prompts repeatedly instruct the language model to:
+
+- Use retrieved public information
+- Avoid inventing company facts
+- Avoid inventing executives
+- Avoid inventing breaches
+- Avoid inventing vulnerabilities
+- Avoid inventing compliance failures
+- Avoid inventing competitor capabilities
+- Avoid inventing technologies
+- Avoid assuming that missing information represents a weakness
+- Clearly identify unavailable information
+- Separate verified evidence from sales recommendations
+
+When information cannot be verified, the preferred response is:
+
+> Not found in retrieved public information.
+
+The competitor workflow also avoids treating missing information as evidence of a competitive weakness.
+
+
+## Model and Framework Selection
+
+
+### Groq
+
+Groq provides API access to the large language model used by the application.
+
+Groq was selected because it provides fast model inference suitable for an interactive research prototype.
+
+During development, API token limits were encountered. This demonstrated the importance of:
+
+- Token management
+- Rate-limit handling
+- Cost controls
+- Caching
+- Efficient prompt design
+- Graceful error handling
+
+
+### LangChain
+
+LangChain is used to coordinate prompts, model calls, structured output, and the different stages of the research workflow.
+
+It provides a consistent way to connect retrieved research with specialized prompts and model responses.
+
+
+### Pydantic
+
+Pydantic defines structured application outputs.
+
+This improves reliability compared with storing every model response as a single block of unstructured text.
+
+
+### Streamlit
+
+Streamlit provides the interactive user interface.
+
+Users can enter prospect information, provide competitor URLs, generate account intelligence, and review the resulting research and recommendation.
+
+
+### Requests and BeautifulSoup
+
+Requests retrieves public webpages.
+
+BeautifulSoup parses HTML and extracts readable content for downstream research and analysis.
+
+
+### UV
+
+UV is used for Python environment and dependency management.
+
+
+## Technology Stack
 
 - Python
 - LangChain
 - Groq API
 - Streamlit
 - Pydantic
+- Requests
+- BeautifulSoup
+- DuckDuckGo Search
 - UV
-- Git/GitHub
+- Pytest
+- Git
+- GitHub
 
-## Example Workflow
 
-User Input  
-→ Prospect Research  
-→ Competitor Research  
-→ Leadership Research  
-→ Public Filing Research  
-→ AI Analysis  
-→ Cyber2Safe Recommendation  
-→ B2B Account Brief
+## Project Structure
 
-## Project Purpose
-
-This project demonstrates how generative AI and structured research workflows can support cybersecurity-focused B2B sales intelligence while maintaining evidence-based output and reducing unsupported model assumptions.
+```text
+cyber2safe-b2b-sales-intelligence/
+│
+├── agents/
+│   └── research_agent.py
+│
+├── chains/
+│   ├── company_research.py
+│   ├── competitor_analysis.py
+│   ├── leadership_strategy.py
+│   └── report_synthesis.py
+│
+├── frontend/
+│   └── app.py
+│
+├── models/
+│   └── schemas.py
+│
+├── prompts/
+│   └── research_prompts.py
+│
+├── research/
+│   └── web_research.py
+│
+├── tests/
+│   └── test_workflow.py
+│
+├── .env
+├── .gitignore
+├── pyproject.toml
+├── README.md
+└── uv.lock

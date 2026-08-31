@@ -1,331 +1,812 @@
+import re
+import socket
+import ipaddress
+from typing import List, Dict
+from urllib.parse import urlparse
+
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse, parse_qs, unquote
+from duckduckgo_search import DDGS
+
+
+# ============================================================
+# SETTINGS
+# ============================================================
+
+REQUEST_TIMEOUT = 15
+
+# Keep retrieved pages small enough to avoid excessive
+# LLM token usage.
+MAX_PAGE_CHARACTERS = 4000
+
+# Limit the number of search results collected.
+MAX_RESULTS_PER_SEARCH = 3
+
+# Only retrieve full content from the strongest few results.
+MAX_FULL_PAGES_PER_SEARCH = 2
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
-    )
+        "Cyber2Safe-B2B-Research/1.0 "
+        "(educational cybersecurity sales research project)"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
 }
 
-TIMEOUT = 12
 
+# ============================================================
+# SSRF PROTECTION
+# ============================================================
+
+def is_safe_ip(ip_address: str) -> bool:
+    """
+    Allow only public IP addresses.
+    """
+
+    try:
+        ip = ipaddress.ip_address(ip_address)
+
+        if ip.is_private:
+            return False
+
+        if ip.is_loopback:
+            return False
+
+        if ip.is_link_local:
+            return False
+
+        if ip.is_reserved:
+            return False
+
+        if ip.is_multicast:
+            return False
+
+        if ip.is_unspecified:
+            return False
+
+        return True
+
+    except ValueError:
+        return False
+
+
+def is_safe_hostname(hostname: str) -> bool:
+    """
+    Reject local or internal hostnames and verify that
+    resolved IP addresses are public.
+    """
+
+    if not hostname:
+        return False
+
+    hostname = hostname.lower().strip()
+
+    blocked_hostnames = {
+        "localhost",
+        "localhost.localdomain",
+        "metadata",
+        "metadata.google.internal",
+    }
+
+    if hostname in blocked_hostnames:
+        return False
+
+    if hostname.endswith(".local"):
+        return False
+
+    if hostname.endswith(".internal"):
+        return False
+
+    try:
+        address_info = socket.getaddrinfo(
+            hostname,
+            None,
+        )
+
+        resolved_ips = {
+            result[4][0]
+            for result in address_info
+        }
+
+        if not resolved_ips:
+            return False
+
+        for resolved_ip in resolved_ips:
+            if not is_safe_ip(resolved_ip):
+                return False
+
+        return True
+
+    except socket.gaierror:
+        return False
+
+    except Exception:
+        return False
+
+
+def is_valid_public_url(url: str) -> bool:
+    """
+    Validate URLs before the application makes an
+    outbound request.
+    """
+
+    if not url:
+        return False
+
+    try:
+        parsed = urlparse(url)
+
+        if parsed.scheme not in (
+            "http",
+            "https",
+        ):
+            return False
+
+        if not parsed.hostname:
+            return False
+
+        # Reject URLs containing embedded credentials.
+        if parsed.username or parsed.password:
+            return False
+
+        if not is_safe_hostname(
+            parsed.hostname
+        ):
+            return False
+
+        return True
+
+    except Exception:
+        return False
+
+
+# ============================================================
+# TEXT CLEANING
+# ============================================================
 
 def clean_text(text: str) -> str:
     """
-    Remove excessive spaces and blank lines from scraped text.
+    Remove unnecessary whitespace from webpage text.
     """
-    return " ".join(text.split())
+
+    if not text:
+        return ""
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    )
+
+    return text.strip()
 
 
-def fetch_page_text(url: str, max_chars: int = 12000) -> str:
-    """
-    Download a public webpage and return readable text.
+# ============================================================
+# FETCH WEBPAGE
+# ============================================================
 
-    Returns an empty string if the page cannot be retrieved.
+def fetch_page_content(url: str) -> str:
     """
+    Retrieve readable public webpage content.
+
+    Redirect destinations are validated before they
+    are requested.
+
+    Retrieved content is intentionally limited to reduce
+    downstream LLM token usage.
+    """
+
+    if not is_valid_public_url(url):
+        return ""
+
     try:
         response = requests.get(
             url,
             headers=HEADERS,
-            timeout=TIMEOUT,
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
         )
+
+        redirect_count = 0
+
+        while (
+            response.is_redirect
+            or response.is_permanent_redirect
+        ):
+            redirect_count += 1
+
+            if redirect_count > 5:
+                return ""
+
+            redirect_url = response.headers.get(
+                "Location"
+            )
+
+            if not redirect_url:
+                return ""
+
+            redirect_url = requests.compat.urljoin(
+                response.url,
+                redirect_url,
+            )
+
+            # Validate every redirect destination.
+            if not is_valid_public_url(
+                redirect_url
+            ):
+                return ""
+
+            response = requests.get(
+                redirect_url,
+                headers=HEADERS,
+                timeout=REQUEST_TIMEOUT,
+                allow_redirects=False,
+            )
 
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        content_type = response.headers.get(
+            "Content-Type",
+            "",
+        ).lower()
 
-        for tag in soup(
+        if (
+            "text/html" not in content_type
+            and "application/xhtml+xml"
+            not in content_type
+        ):
+            return ""
+
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser",
+        )
+
+        # Remove content that normally provides little
+        # useful research evidence.
+        for element in soup(
             [
                 "script",
                 "style",
-                "nav",
-                "footer",
                 "noscript",
                 "svg",
+                "form",
+                "iframe",
             ]
         ):
-            tag.decompose()
+            element.decompose()
 
-        text = clean_text(soup.get_text(" "))
+        main_content = (
+            soup.find("main")
+            or soup.find("article")
+            or soup.body
+            or soup
+        )
 
-        return text[:max_chars]
+        text = main_content.get_text(
+            separator=" ",
+            strip=True,
+        )
+
+        text = clean_text(text)
+
+        return text[:MAX_PAGE_CHARACTERS]
 
     except requests.RequestException:
         return ""
 
-
-def clean_search_url(url: str) -> str:
-    """
-    Convert DuckDuckGo redirect URLs into normal destination URLs.
-    """
-    try:
-        parsed = urlparse(url)
-
-        if "duckduckgo.com" in parsed.netloc:
-            query = parse_qs(parsed.query)
-
-            if "uddg" in query:
-                return unquote(query["uddg"][0])
-
-        return url
-
     except Exception:
-        return url
+        return ""
 
 
-def search_web(query: str, max_results: int = 5) -> list[dict]:
+# ============================================================
+# COMPANY WEBSITE
+# ============================================================
+
+def fetch_company_website(
+    company_url: str,
+) -> str:
     """
-    Search the public web using DuckDuckGo's HTML results.
-
-    Returns:
-    [
-        {
-            "title": "...",
-            "url": "...",
-            "snippet": "..."
-        }
-    ]
+    Retrieve the prospect company's public website.
     """
-    search_url = "https://html.duckduckgo.com/html/"
+
+    content = fetch_page_content(
+        company_url
+    )
+
+    if content:
+        return content
+
+    return (
+        "The company website could not be retrieved."
+    )
+
+
+# ============================================================
+# DUCKDUCKGO SEARCH
+# ============================================================
+
+def search_web(
+    query: str,
+    max_results: int = MAX_RESULTS_PER_SEARCH,
+) -> List[Dict]:
+    """
+    Search DuckDuckGo for relevant public sources.
+    """
+
+    results = []
 
     try:
-        response = requests.get(
-            search_url,
-            params={"q": query},
-            headers=HEADERS,
-            timeout=TIMEOUT,
-        )
-
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        results = []
-
-        for result in soup.select(".result"):
-            link = result.select_one(".result__a")
-
-            if not link:
-                continue
-
-            title = clean_text(link.get_text(" ", strip=True))
-            url = clean_search_url(link.get("href", ""))
-
-            snippet_element = result.select_one(".result__snippet")
-
-            snippet = (
-                clean_text(
-                    snippet_element.get_text(" ", strip=True)
-                )
-                if snippet_element
-                else ""
+        with DDGS() as ddgs:
+            search_results = ddgs.text(
+                query,
+                max_results=max_results,
             )
 
-            if url.startswith("http"):
+            for item in search_results:
+                title = item.get(
+                    "title",
+                    "",
+                )
+
+                url = (
+                    item.get("href")
+                    or item.get("url")
+                    or ""
+                )
+
+                snippet = (
+                    item.get("body")
+                    or item.get("snippet")
+                    or ""
+                )
+
+                if not url:
+                    continue
+
+                if not is_valid_public_url(
+                    url
+                ):
+                    continue
+
                 results.append(
                     {
                         "title": title,
                         "url": url,
                         "snippet": snippet,
+                        "page_content": "",
                     }
                 )
 
-            if len(results) >= max_results:
-                break
-
-        return results
-
-    except requests.RequestException:
+    except Exception:
         return []
 
+    return results
 
-def research_company(company_url: str) -> dict:
+
+# ============================================================
+# OPEN SEARCH RESULTS
+# ============================================================
+
+def enrich_search_results(
+    results: List[Dict],
+    max_pages: int = MAX_FULL_PAGES_PER_SEARCH,
+) -> List[Dict]:
     """
-    Retrieve the company's public website text.
+    Open selected search-result webpages and attach
+    their actual page content.
+
+    The number of full pages is intentionally limited
+    to control token usage.
     """
-    website_text = fetch_page_text(company_url)
+
+    enriched_results = []
+
+    pages_opened = 0
+
+    for result in results:
+        enriched = dict(result)
+
+        url = enriched.get(
+            "url",
+            "",
+        )
+
+        if (
+            url
+            and pages_opened < max_pages
+        ):
+            page_content = fetch_page_content(
+                url
+            )
+
+            enriched["page_content"] = (
+                page_content
+            )
+
+            if page_content:
+                pages_opened += 1
+
+        enriched_results.append(
+            enriched
+        )
+
+    return enriched_results
+
+
+# ============================================================
+# SEARCH AND RETRIEVE
+# ============================================================
+
+def search_and_retrieve(
+    query: str,
+    max_results: int = MAX_RESULTS_PER_SEARCH,
+    max_pages: int = MAX_FULL_PAGES_PER_SEARCH,
+) -> List[Dict]:
+    """
+    Search for public sources and retrieve selected
+    full webpages.
+    """
+
+    results = search_web(
+        query=query,
+        max_results=max_results,
+    )
+
+    return enrich_search_results(
+        results,
+        max_pages=max_pages,
+    )
+
+
+# ============================================================
+# FORMAT RESULTS FOR LLM
+# ============================================================
+
+def format_search_results(
+    results: List[Dict],
+) -> str:
+    """
+    Format retrieved evidence for downstream LLM analysis.
+
+    Full source content is preferred over search snippets.
+    Search snippets are retained as fallback evidence.
+    """
+
+    if not results:
+        return (
+            "No public search results were retrieved."
+        )
+
+    formatted = []
+
+    for number, result in enumerate(
+        results,
+        start=1,
+    ):
+        if not isinstance(result, dict):
+            continue
+
+        title = result.get(
+            "title",
+            "",
+        )
+
+        url = result.get(
+            "url",
+            "",
+        )
+
+        snippet = result.get(
+            "snippet",
+            "",
+        )
+
+        page_content = result.get(
+            "page_content",
+            "",
+        )
+
+        if page_content:
+            evidence = (
+                "FULL SOURCE PAGE CONTENT:\n"
+                f"{page_content}"
+            )
+
+        elif snippet:
+            evidence = (
+                "SEARCH RESULT SNIPPET ONLY:\n"
+                f"{snippet}"
+            )
+
+        else:
+            evidence = (
+                "No readable source content "
+                "was retrieved."
+            )
+
+        formatted.append(
+            f"""
+SOURCE {number}
+
+Title:
+{title}
+
+URL:
+{url}
+
+Evidence:
+{evidence}
+""".strip()
+        )
+
+    if not formatted:
+        return (
+            "No usable public research evidence "
+            "was retrieved."
+        )
+
+    return "\n\n".join(
+        formatted
+    )
+
+
+# ============================================================
+# COMPANY STRATEGY
+# ============================================================
+
+def research_company_strategy(
+    company_name: str,
+) -> List[Dict]:
+    """
+    Research strategy, priorities, growth,
+    technology, and cybersecurity.
+    """
+
+    query = (
+        f'"{company_name}" '
+        "company strategy business priorities "
+        "growth technology cybersecurity"
+    )
+
+    return search_and_retrieve(
+        query
+    )
+
+
+# ============================================================
+# JOB POSTINGS
+# ============================================================
+
+def research_job_postings(
+    company_name: str,
+) -> List[Dict]:
+    """
+    Research cybersecurity and technology job postings.
+    """
+
+    query = (
+        f'"{company_name}" jobs careers '
+        "cybersecurity security information technology "
+        "risk compliance"
+    )
+
+    return search_and_retrieve(
+        query
+    )
+
+
+# ============================================================
+# LEADERSHIP
+# ============================================================
+
+def research_leadership(
+    company_name: str,
+) -> List[Dict]:
+    """
+    Research publicly available company leadership.
+    """
+
+    query = (
+        f'"{company_name}" leadership '
+        "CEO CIO CTO CISO cybersecurity "
+        "information technology HR training"
+    )
+
+    return search_and_retrieve(
+        query
+    )
+
+
+# ============================================================
+# ANNUAL REPORT / 10-K
+# ============================================================
+
+def research_annual_report(
+    company_name: str,
+) -> List[Dict]:
+    """
+    Research annual reports, 10-K filings,
+    cybersecurity risks, and technology priorities.
+    """
+
+    query = (
+        f'"{company_name}" '
+        '"annual report" OR "10-K" '
+        "cybersecurity risk technology"
+    )
+
+    return search_and_retrieve(
+        query
+    )
+
+
+# ============================================================
+# RECENT DEVELOPMENTS
+# ============================================================
+
+def research_recent_articles(
+    company_name: str,
+) -> List[Dict]:
+    """
+    Research recent public company developments.
+    """
+
+    query = (
+        f'"{company_name}" '
+        "news cybersecurity technology "
+        "growth partnership expansion"
+    )
+
+    return search_and_retrieve(
+        query
+    )
+
+
+# ============================================================
+# COMPETITOR RESEARCH
+# ============================================================
+
+def research_competitor_url(
+    competitor_url: str,
+) -> Dict:
+    """
+    Retrieve a competitor website supplied by the user.
+    """
+
+    if not is_valid_public_url(
+        competitor_url
+    ):
+        return {
+            "title": competitor_url,
+            "url": competitor_url,
+            "snippet": "",
+            "page_content": "",
+        }
+
+    page_content = fetch_page_content(
+        competitor_url
+    )
 
     return {
-        "company_url": company_url,
-        "website_text": website_text,
+        "title": competitor_url,
+        "url": competitor_url,
+        "snippet": "",
+        "page_content": page_content,
     }
 
 
-def research_leadership(company_name: str) -> list[dict]:
-    """
-    Search for executives and leadership information.
-    """
-    queries = [
-        f"{company_name} leadership executive team",
-        f"{company_name} CEO CIO CISO leadership",
-    ]
-
-    results = []
-
-    for query in queries:
-        results.extend(search_web(query, max_results=4))
-
-    return remove_duplicate_results(results)
-
-
-def research_strategy(company_name: str) -> list[dict]:
-    """
-    Search for company strategy, priorities, expansion,
-    digital initiatives, and business developments.
-    """
-    queries = [
-        f"{company_name} company strategy priorities",
-        f"{company_name} digital transformation strategy",
-        f"{company_name} growth priorities press release",
-    ]
-
-    results = []
-
-    for query in queries:
-        results.extend(search_web(query, max_results=4))
-
-    return remove_duplicate_results(results)
-
-
 def research_competitors(
-    competitor_urls: list[str],
-) -> list[dict]:
+    competitor_urls: List[str],
+) -> List[Dict]:
     """
-    Retrieve public information from competitor websites.
+    Retrieve public content for multiple competitors.
     """
-    competitors = []
 
-    for url in competitor_urls:
-        text = fetch_page_text(url, max_chars=7000)
+    results = []
 
-        competitors.append(
-            {
-                "url": url,
-                "website_text": text,
-            }
+    for competitor_url in competitor_urls:
+        competitor_url = (
+            competitor_url.strip()
         )
 
-    return competitors
-
-
-def research_annual_report(company_name: str) -> list[dict]:
-    """
-    Search for annual reports, investor reports, and SEC 10-K filings.
-    """
-    queries = [
-        f"{company_name} annual report",
-        f"{company_name} 10-K site:sec.gov",
-        f"{company_name} investor relations annual report",
-    ]
-
-    results = []
-
-    for query in queries:
-        results.extend(search_web(query, max_results=4))
-
-    return remove_duplicate_results(results)
-
-
-def research_recent_articles(company_name: str) -> list[dict]:
-    """
-    Search for recent public articles and company developments.
-    """
-    queries = [
-        f"{company_name} latest news",
-        f"{company_name} cybersecurity news",
-        f"{company_name} expansion technology news",
-    ]
-
-    results = []
-
-    for query in queries:
-        results.extend(search_web(query, max_results=5))
-
-    return remove_duplicate_results(results)
-
-
-def research_job_postings(company_name: str) -> list[dict]:
-    """
-    Search public job postings for signals about technology,
-    cybersecurity, growth, and operational priorities.
-    """
-    queries = [
-        f"{company_name} cybersecurity jobs",
-        f"{company_name} information security jobs",
-        f"{company_name} technology jobs",
-    ]
-
-    results = []
-
-    for query in queries:
-        results.extend(search_web(query, max_results=4))
-
-    return remove_duplicate_results(results)
-
-
-def remove_duplicate_results(
-    results: list[dict],
-) -> list[dict]:
-    """
-    Remove duplicate web results based on URL.
-    """
-    unique_results = []
-    seen_urls = set()
-
-    for result in results:
-        url = result.get("url")
-
-        if not url or url in seen_urls:
+        if not competitor_url:
             continue
 
-        seen_urls.add(url)
-        unique_results.append(result)
+        if not is_valid_public_url(
+            competitor_url
+        ):
+            continue
 
-    return unique_results
-
-
-def format_search_results(
-    results: list[dict],
-    max_items: int = 8,
-) -> str:
-    """
-    Convert search results into text that can be passed
-    safely into the language model.
-    """
-    if not results:
-        return "No public search results were retrieved."
-
-    sections = []
-
-    for result in results[:max_items]:
-        sections.append(
-            f"""
-Title: {result.get("title", "")}
-URL: {result.get("url", "")}
-Public Search Snippet: {result.get("snippet", "")}
-"""
+        result = research_competitor_url(
+            competitor_url
         )
 
-    return "\n".join(sections)
+        results.append(
+            result
+        )
+
+    return results
 
 
-def collect_source_links(
-    *result_groups: list[dict],
-) -> list[str]:
+# ============================================================
+# COMPATIBILITY FUNCTIONS
+# ============================================================
+# These preserve the function names used by the original
+# Cyber2Safe research chains.
+
+
+def research_company(
+    company_url: str,
+) -> str:
     """
-    Collect unique source URLs for the final account brief.
+    Original function name used by the company chain.
     """
-    links = []
-    seen = set()
 
-    for group in result_groups:
-        for item in group:
-            url = item.get("url")
+    return fetch_company_website(
+        company_url
+    )
 
-            if url and url not in seen:
-                seen.add(url)
-                links.append(url)
 
-    return links
+def research_strategy(
+    company_name: str,
+):
+    """
+    Original function name used for strategy research.
+    """
+
+    return research_company_strategy(
+        company_name
+    )
+
+
+def research_jobs(
+    company_name: str,
+):
+    """
+    Original function name used for job research.
+    """
+
+    return research_job_postings(
+        company_name
+    )
+
+
+def research_leaders(
+    company_name: str,
+):
+    """
+    Original function name used for leadership research.
+    """
+
+    return research_leadership(
+        company_name
+    )
+
+
+def research_annual_reports(
+    company_name: str,
+):
+    """
+    Original function name used for annual-report research.
+    """
+
+    return research_annual_report(
+        company_name
+    )
+
+
+def research_recent_news(
+    company_name: str,
+):
+    """
+    Original function name used for recent-development research.
+    """
+
+    return research_recent_articles(
+        company_name
+    )

@@ -21,10 +21,14 @@ load_dotenv(override=True)
 
 model = ChatGroq(
     api_key=os.getenv("GROQ_API_KEY"),
-    model="groq/compound-mini",
+    model="openai/gpt-oss-20b",
     temperature=0,
 )
 
+
+# ============================================================
+# SALES RECOMMENDATION
+# ============================================================
 
 def run_sales_recommendation(
     product_name: str,
@@ -38,6 +42,7 @@ def run_sales_recommendation(
     annual_report_analysis,
 ):
 
+    # Research recent public articles about the prospect.
     recent_articles = research_recent_articles(
         company_name
     )
@@ -46,45 +51,54 @@ def run_sales_recommendation(
         recent_articles
     )
 
-    chain = sales_recommendation_prompt | model
+    # Use the SalesRecommendation Pydantic schema so the AI must
+    # return the recommendation in the correct fields.
+    structured_model = model.with_structured_output(
+        SalesRecommendation
+    )
 
-    raw_response = chain.invoke(
+    chain = sales_recommendation_prompt | structured_model
+
+    recommendation = chain.invoke(
         {
             "product_name": product_name,
             "product_category": product_category,
             "value_proposition": value_proposition,
             "target_customer": target_customer,
             "company_name": company_name,
-            "company_analysis": company_analysis.model_dump_json(
-                indent=2
+            "company_analysis": (
+                company_analysis.model_dump_json(
+                    indent=2
+                )
             ),
-            "competitor_analysis": competitor_analysis.model_dump_json(
-                indent=2
+            "competitor_analysis": (
+                competitor_analysis.model_dump_json(
+                    indent=2
+                )
             ),
-            "leadership_analysis": leadership_analysis.model_dump_json(
-                indent=2
+            "leadership_analysis": (
+                leadership_analysis.model_dump_json(
+                    indent=2
+                )
             ),
-            "annual_report_analysis": annual_report_analysis.model_dump_json(
-                indent=2
+            "annual_report_analysis": (
+                annual_report_analysis.model_dump_json(
+                    indent=2
+                )
             ),
             "recent_developments": recent_developments,
         }
     )
 
-    recommendation = SalesRecommendation(
-        recommended_cyber2safe_service=product_name,
-        opportunity_summary=raw_response.content,
-        why_it_fits=raw_response.content,
-        recommended_sales_angle=raw_response.content,
-        likely_buyer=(
-            "Cybersecurity, IT, Risk, HR, or "
-            "Learning and Development leadership"
-        ),
-        suggested_outreach_message=raw_response.content,
-    )
-
+    # IMPORTANT:
+    # We return the AI's structured recommendation.
+    # We DO NOT overwrite it with product_name.
     return recommendation, recent_articles
 
+
+# ============================================================
+# FINAL ACCOUNT BRIEF
+# ============================================================
 
 def run_account_brief(
     company_name: str,
@@ -105,25 +119,36 @@ def run_account_brief(
     raw_response = chain.invoke(
         {
             "company_name": company_name,
-            "company_analysis": company_analysis.model_dump_json(
-                indent=2
+            "company_analysis": (
+                company_analysis.model_dump_json(
+                    indent=2
+                )
             ),
-            "competitor_analysis": competitor_analysis.model_dump_json(
-                indent=2
+            "competitor_analysis": (
+                competitor_analysis.model_dump_json(
+                    indent=2
+                )
             ),
-            "leadership_analysis": leadership_analysis.model_dump_json(
-                indent=2
+            "leadership_analysis": (
+                leadership_analysis.model_dump_json(
+                    indent=2
+                )
             ),
-            "annual_report_analysis": annual_report_analysis.model_dump_json(
-                indent=2
+            "annual_report_analysis": (
+                annual_report_analysis.model_dump_json(
+                    indent=2
+                )
             ),
             "recent_developments": recent_developments,
-            "sales_recommendation": sales_recommendation.model_dump_json(
-                indent=2
+            "sales_recommendation": (
+                sales_recommendation.model_dump_json(
+                    indent=2
+                )
             ),
         }
     )
 
+    # Collect all verified public source links.
     all_links = []
 
     source_groups = [
@@ -139,28 +164,56 @@ def run_account_brief(
     ]
 
     for group in source_groups:
+
         for link in group:
+
             if link and link not in all_links:
+
                 all_links.append(link)
 
+    # Create the final account brief.
     return AccountBrief(
         company_name=company_name,
-        company_strategy=company_analysis.company_strategy,
-        competitor_analysis=competitor_analysis.competitor_summary,
-        leadership_summary=leadership_analysis.leadership_summary,
+
+        company_strategy=(
+            company_analysis.company_strategy
+        ),
+
+        competitor_analysis=(
+            competitor_analysis.competitor_summary
+        ),
+
+        leadership_summary=(
+            leadership_analysis.leadership_summary
+        ),
+
         annual_report_insights=" ".join(
-            annual_report_analysis.cybersecurity_relevant_insights
+            annual_report_analysis
+            .cybersecurity_relevant_insights
         ),
+
         recent_developments=recent_developments,
+
+        # IMPORTANT:
+        # This now comes from the AI's structured recommendation.
         recommended_cyber2safe_service=(
-            sales_recommendation.recommended_cyber2safe_service
+            sales_recommendation
+            .recommended_cyber2safe_service
         ),
-        sales_opportunity=raw_response.content,
+
+        sales_opportunity=(
+            sales_recommendation.opportunity_summary
+        ),
+
         recommended_sales_angle=(
-            sales_recommendation.recommended_sales_angle
+            sales_recommendation
+            .recommended_sales_angle
         ),
+
         suggested_outreach_message=(
-            sales_recommendation.suggested_outreach_message
+            sales_recommendation
+            .suggested_outreach_message
         ),
+
         source_links=all_links,
     )
